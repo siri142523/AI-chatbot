@@ -1,0 +1,145 @@
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
+
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
+public class JusticeChatbot {
+
+    private JSONObject knowledgeBase;
+    private final Map<String, Pattern> keywordPatterns = new HashMap<>(); // Store compiled patterns
+
+    public JusticeChatbot(String knowledgeBasePath) {
+        try {
+            knowledgeBase = loadKnowledgeBase(knowledgeBasePath);
+            compileKeywordPatterns(); // Compile patterns when the chatbot starts
+        } catch (IOException | ParseException e) {
+            System.err.println("Error loading knowledge base: " + e.getMessage());
+            knowledgeBase = createFallbackKnowledgeBase();
+        }
+    }
+
+    private JSONObject loadKnowledgeBase(String knowledgeBasePath) throws IOException, ParseException {
+        JSONParser parser = new JSONParser();
+        try (FileReader reader = new FileReader(knowledgeBasePath)) {
+            return (JSONObject) parser.parse(reader);
+        }
+    }
+
+    private JSONObject createFallbackKnowledgeBase() {
+        JSONObject fallback = new JSONObject();
+        fallback.put("greeting", new JSONArray() {{ add("Hello!"); }});
+        fallback.put("farewell", new JSONArray() {{ add("Goodbye!"); }});
+        fallback.put("topics", new JSONArray());
+        fallback.put("default", "I am unable to answer your question at this time.");
+        return fallback;
+    }
+
+    // Pre-compile keyword patterns for efficiency.  Call this once during initialization.
+    private void compileKeywordPatterns() {
+        JSONArray topics = (JSONArray) knowledgeBase.get("topics");
+        if (topics != null) {
+            for (Object topicObj : topics) {
+                JSONObject topic = (JSONObject) topicObj;
+                String topicName = (String) topic.get("topic");
+                JSONArray keywords = (JSONArray) topic.get("keywords");
+                if (keywords != null && !keywords.isEmpty()) {
+                    StringBuilder regexBuilder = new StringBuilder();
+                    for (Object keywordObj : keywords) {
+                        String keyword = (String) keywordObj;
+                        // Escape special regex characters in keywords (important for security and correctness)
+                        String escapedKeyword = Pattern.quote(keyword);
+                        regexBuilder.append(escapedKeyword).append("|");  // Use OR for multiple keywords
+                    }
+
+                    if (regexBuilder.length() > 0) {
+                        regexBuilder.deleteCharAt(regexBuilder.length() - 1); // Remove the trailing "|"
+                        Pattern pattern = Pattern.compile(regexBuilder.toString(), Pattern.CASE_INSENSITIVE); // Case-insensitive matching
+                        keywordPatterns.put(topicName, pattern);  // Store compiled pattern
+                    }
+                }
+            }
+        }
+    }
+
+
+
+    public String respond(String userInput) {
+        userInput = userInput.toLowerCase();
+
+        // Greeting
+        if (userInput.contains("hello") || userInput.contains("hi") || userInput.contains("greetings")) {
+            JSONArray greetings = (JSONArray) knowledgeBase.get("greeting");
+            return getRandomResponse(greetings);
+        }
+
+        // Farewell
+        if (userInput.contains("bye") || userInput.contains("goodbye") || userInput.contains("farewell") || userInput.contains("thank you")) {
+            JSONArray farewells = (JSONArray) knowledgeBase.get("farewell");
+            return getRandomResponse(farewells);
+        }
+
+        // Topic Matching (using pre-compiled regex patterns)
+        String topicResponse = findBestTopicMatch(userInput);
+        if (topicResponse != null) {
+            return topicResponse;
+        }
+
+        // Default Response
+        return (String) knowledgeBase.get("default");
+    }
+
+    private String findBestTopicMatch(String userInput) {
+        JSONArray topics = (JSONArray) knowledgeBase.get("topics");
+        if (topics != null) {
+            for (Object topicObj : topics) {
+                JSONObject topic = (JSONObject) topicObj;
+                String topicName = (String) topic.get("topic");
+                Pattern pattern = keywordPatterns.get(topicName); // Retrieve pre-compiled pattern
+
+                if (pattern != null) {
+                    Matcher matcher = pattern.matcher(userInput);
+                    if (matcher.find()) {
+                        return (String) topic.get("response");
+                    }
+                }
+            }
+        }
+        return null; // No matching topic found
+    }
+
+
+
+    private String getRandomResponse(JSONArray responses) {
+        if (responses != null && !responses.isEmpty()) {
+            Random random = new Random();
+            return (String) responses.get(random.nextInt(responses.size()));
+        } else {
+            return "I have no response for that.";
+        }
+    }
+
+    public static void main(String[] args) {
+        JusticeChatbot chatbot = new JusticeChatbot("justice_data.json"); //  Create justice_data.json
+
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Justice Department Chatbot: Hello, how can I help you today?");
+
+        while (true) {
+            System.out.print("You: ");
+            String userInput = scanner.nextLine();
+            String response = chatbot.respond(userInput);
+            System.out.println("Chatbot: " + response);
+
+            if (userInput.toLowerCase().contains("bye") || userInput.toLowerCase().contains("goodbye") || userInput.toLowerCase().contains("farewell")) {
+                break;
+            }
+        }
+        scanner.close();
+    }
+}
